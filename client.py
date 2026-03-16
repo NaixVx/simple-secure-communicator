@@ -75,7 +75,8 @@ def receive():
                 user_list.delete(0, tk.END)
 
                 for u in users:
-                    user_list.insert(tk.END, u)
+                    if u != nickname:
+                        user_list.insert(tk.END, u)
 
             else:
                 chat.insert(tk.END, msg + "\n")
@@ -125,6 +126,9 @@ root.title("Chat")
 
 # pytanie o nick
 nickname = simpledialog.askstring("Nickname", "Enter nickname:", parent=root)
+
+logged_label = tk.Label(root, text=f"Logged as: {nickname}", font=("Arial", 10, "bold"))
+logged_label.pack()
 
 main_frame = tk.Frame(root)
 main_frame.pack()
