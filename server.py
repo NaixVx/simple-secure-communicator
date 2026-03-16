@@ -14,21 +14,29 @@ def handle_client(conn, addr):
     while True:
         try:
             data = conn.recv(1024)
+
             if not data:
+                print(f"[NO DATA] {addr}")
                 break
 
             msg = data.decode()
+
             print(f"[MESSAGE] {addr}: {msg}")
+            print(f"[CLIENT COUNT] {len(clients)}")
 
             for c in clients:
                 if c != conn:
                     c.send(f"{addr}: {msg}".encode())
 
-        except:
+        except Exception as e:
+            print(f"[ERROR] {addr} -> {e}")
             break
 
     print(f"[DISCONNECTED] {addr}")
-    clients.remove(conn)
+
+    if conn in clients:
+        clients.remove(conn)
+
     conn.close()
 
 def accept_plain(sock):
