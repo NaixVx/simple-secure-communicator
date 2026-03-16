@@ -6,59 +6,141 @@ HOST = "0.0.0.0"
 PORT_PLAIN = 5000
 PORT_TLS = 5001
 
-clients = []
+clients = {}   # nick -> socket
+
+
+def broadcast_users():
+    users = ",".join(clients.keys())
+    msg = f"USERS:{users}"
+
+    print(f"[USERS LIST] {users}")
+
+    for c in clients.values():
+        try:
+            c.send(msg.encode())
+        except:
+            pass
+
 
 def handle_client(conn, addr):
-    print(f"[CONNECTED] {addr}")
+
+    try:
+        data = conn.recv(1024)
+
+        if not data:
+            conn.close()
+            return
+
+        msg = data.decode()
+
+        if not msg.startswith("NICK:"):
+            conn.close()
+            return
+
+        nick = msg.split(":", 1)[1]
+
+    except:
+        conn.close()
+        return
+
+    clients[nick] = conn
+
+    print(f"[JOIN] {nick} from {addr}")
+    print(f"[CLIENT COUNT] {len(clients)}")
+
+    broadcast_users()
 
     while True:
         try:
             data = conn.recv(1024)
 
             if not data:
-                print(f"[NO DATA] {addr}")
+                print(f"[NO DATA] {nick}")
                 break
 
             msg = data.decode()
 
-            print(f"[MESSAGE] {addr}: {msg}")
-            print(f"[CLIENT COUNT] {len(clients)}")
+            print(f"[RAW MESSAGE] {nick}: {msg}")
 
-            for c in clients:
-                if c != conn:
-                    c.send(f"{addr}: {msg}".encode())
+            # wiadomość prywatna
+            if msg.startswith("PM:"):
+
+                try:
+                    _, target, text = msg.split(":", 2)
+
+                    if target in clients:
+                        clients[target].send(f"[PM from {nick}] {text}".encode())
+                        print(f"[PM] {nick} -> {target}: {text}")
+
+                    else:
+                        conn.send(f"[SERVER] user {target} not found".encode())
+
+                except Exception as e:
+                    print(f"[PM ERROR] {e}")
+
+            # wiadomość publiczna
+            elif msg.startswith("MSG:"):
+
+                text = msg.split(":", 1)[1]
+
+                print(f"[PUBLIC] {nick}: {text}")
+
+                for user, client in clients.items():
+                    if client != conn:
+                        client.send(f"{nick}: {text}".encode())
+
+            else:
+                print("[UNKNOWN FORMAT]", msg)
 
         except Exception as e:
-            print(f"[ERROR] {addr} -> {e}")
+            print(f"[ERROR] {nick} -> {e}")
             break
 
-    print(f"[DISCONNECTED] {addr}")
+    print(f"[DISCONNECTED] {nick}")
 
-    if conn in clients:
-        clients.remove(conn)
+    if nick in clients:
+        del clients[nick]
+
+    broadcast_users()
 
     conn.close()
+
 
 def accept_plain(sock):
     while True:
         conn, addr = sock.accept()
-        clients.append(conn)
-        threading.Thread(target=handle_client, args=(conn, addr), daemon=True).start()
+        print(f"[PLAIN CONNECT] {addr}")
+
+        threading.Thread(
+            target=handle_client,
+            args=(conn, addr),
+            daemon=True
+        ).start()
+
 
 def accept_tls(sock, context):
     while True:
         conn, addr = sock.accept()
-        tls_conn = context.wrap_socket(conn, server_side=True)
-        clients.append(tls_conn)
-        threading.Thread(target=handle_client, args=(tls_conn, addr), daemon=True).start()
+
+        try:
+            tls_conn = context.wrap_socket(conn, server_side=True)
+        except Exception as e:
+            print("[TLS ERROR]", e)
+            continue
+
+        print(f"[TLS CONNECT] {addr}")
+
+        threading.Thread(
+            target=handle_client,
+            args=(tls_conn, addr),
+            daemon=True
+        ).start()
 
 
-# socket plaintext
 plain_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 plain_sock.bind((HOST, PORT_PLAIN))
 plain_sock.listen()
 
-# socket TLS
 tls_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 tls_sock.bind((HOST, PORT_TLS))
 tls_sock.listen()

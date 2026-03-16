@@ -2,10 +2,12 @@ import socket
 import ssl
 import threading
 import tkinter as tk
+from tkinter import simpledialog
 
 HOST = "localhost"
 
 sock = None
+nickname = None
 
 def log(msg):
     print("[CLIENT]", msg)
@@ -36,7 +38,10 @@ def connect():
         log(f"Connecting to {HOST}:{port} TLS={use_tls}")
         sock.connect((HOST, port))
 
-        chat.insert(tk.END, f"Connected TLS={use_tls}, port={port}\n")
+        # wysłanie nicka
+        sock.send(f"NICK:{nickname}".encode())
+
+        chat.insert(tk.END, f"Connected as {nickname} TLS={use_tls}\n")
 
         threading.Thread(target=receive, daemon=True).start()
 
@@ -60,28 +65,50 @@ def receive():
                 break
 
             msg = data.decode()
+
             log(f"Received: {msg}")
 
-            chat.insert(tk.END, msg + "\n")
+            # aktualizacja listy użytkowników
+            if msg.startswith("USERS:"):
+                users = msg.split(":")[1].split(",")
+
+                user_list.delete(0, tk.END)
+
+                for u in users:
+                    user_list.insert(tk.END, u)
+
+            else:
+                chat.insert(tk.END, msg + "\n")
 
         except Exception as e:
             log(f"Receive error: {e}")
             break
 
 
-def send():
-    global sock
+def get_selected_user():
+    selection = user_list.curselection()
+    if selection:
+        return user_list.get(selection[0])
+    return None
 
+
+def send():
     msg = entry.get()
+    target = get_selected_user()
+
+    if not msg:
+        return
 
     try:
-        log(f"Sending: {msg}")
-        sock.send(msg.encode())
+        if target:
+            sock.send(f"PM:{target}:{msg}".encode())
+            chat.insert(tk.END, f"[PM to {target}] {msg}\n")
 
-        chat.insert(tk.END, f"Me: {msg}\n")
+        else:
+            sock.send(f"MSG:{msg}".encode())
+            chat.insert(tk.END, f"Me: {msg}\n")
 
     except Exception as e:
-        log(f"Send error: {e}")
         chat.insert(tk.END, f"Send error: {e}\n")
 
     entry.delete(0, tk.END)
@@ -92,16 +119,31 @@ def toggle_tls():
     connect()
 
 
+# GUI
 root = tk.Tk()
 root.title("Chat")
 
-chat = tk.Text(root, height=15)
+# pytanie o nick
+nickname = simpledialog.askstring("Nickname", "Enter nickname:", parent=root)
+
+main_frame = tk.Frame(root)
+main_frame.pack()
+
+# lista użytkowników
+user_list = tk.Listbox(main_frame, width=20)
+user_list.pack(side=tk.LEFT, fill=tk.Y)
+
+# czat
+chat_frame = tk.Frame(main_frame)
+chat_frame.pack(side=tk.RIGHT)
+
+chat = tk.Text(chat_frame, height=15, width=50)
 chat.pack()
 
-entry = tk.Entry(root)
+entry = tk.Entry(chat_frame)
 entry.pack()
 
-send_btn = tk.Button(root, text="Send", command=send)
+send_btn = tk.Button(chat_frame, text="Send", command=send)
 send_btn.pack()
 
 tls_var = tk.BooleanVar()
