@@ -9,6 +9,12 @@ HOST = "localhost"
 sock = None
 nickname = None
 
+current_chat = "GLOBAL"
+
+chat_history = {
+    "GLOBAL": []
+}
+
 def log(msg):
     print("[CLIENT]", msg)
 
@@ -49,6 +55,8 @@ def connect():
         log(f"Connection error: {e}")
         chat.insert(tk.END, f"Connection error: {e}\n")
 
+    refresh_chat()
+
 
 def receive():
     global sock
@@ -65,21 +73,40 @@ def receive():
                 break
 
             msg = data.decode()
-
             log(f"Received: {msg}")
 
-            # aktualizacja listy użytkowników
+            # USERS LIST
             if msg.startswith("USERS:"):
                 users = msg.split(":")[1].split(",")
 
                 user_list.delete(0, tk.END)
+                user_list.insert(tk.END, "GLOBAL")
 
                 for u in users:
                     if u != nickname:
                         user_list.insert(tk.END, u)
 
+            # PRIVATE MESSAGE
+            elif msg.startswith("[PM from"):
+                sender = msg.split("]")[0].split()[-1]
+
+                if sender not in chat_history:
+                    chat_history[sender] = []
+
+                chat_history[sender].append(msg)
+
+                if current_chat == sender:
+                    chat.insert(tk.END, msg + "\n")
+
+            # PUBLIC MESSAGE
             else:
-                chat.insert(tk.END, msg + "\n")
+                if "GLOBAL" not in chat_history:
+                    chat_history["GLOBAL"] = []
+
+                chat_history["GLOBAL"].append(msg)
+
+                if current_chat == "GLOBAL":
+                    chat.insert(tk.END, msg + "\n")
 
         except Exception as e:
             log(f"Receive error: {e}")
@@ -93,21 +120,56 @@ def get_selected_user():
     return None
 
 
+def select_chat(event):
+    global current_chat
+
+    selection = user_list.curselection()
+    if not selection:
+        return
+
+    target = user_list.get(selection[0])
+
+    current_chat = target
+
+    chat_label.config(text=f"Chat: {current_chat}")
+
+    refresh_chat()
+
+
+def refresh_chat():
+
+    chat.delete("1.0", tk.END)
+
+    if current_chat not in chat_history:
+        chat_history[current_chat] = []
+
+    for msg in chat_history[current_chat]:
+        chat.insert(tk.END, msg + "\n")
+
+
 def send():
     msg = entry.get()
-    target = get_selected_user()
 
     if not msg:
         return
 
     try:
-        if target:
-            sock.send(f"PM:{target}:{msg}".encode())
-            chat.insert(tk.END, f"[PM to {target}] {msg}\n")
+        if current_chat == "GLOBAL":
+
+            sock.send(f"MSG:{msg}".encode())
+
+            chat_history["GLOBAL"].append(f"Me: {msg}")
 
         else:
-            sock.send(f"MSG:{msg}".encode())
-            chat.insert(tk.END, f"Me: {msg}\n")
+
+            sock.send(f"PM:{current_chat}:{msg}".encode())
+
+            if current_chat not in chat_history:
+                chat_history[current_chat] = []
+
+            chat_history[current_chat].append(f"[PM to {current_chat}] {msg}")
+
+        refresh_chat()
 
     except Exception as e:
         chat.insert(tk.END, f"Send error: {e}\n")
@@ -126,7 +188,9 @@ root.title("Chat")
 
 # pytanie o nick
 nickname = simpledialog.askstring("Nickname", "Enter nickname:", parent=root)
-
+if not nickname:
+    nickname = "Anonymous"
+    
 logged_label = tk.Label(root, text=f"Logged as: {nickname}", font=("Arial", 10, "bold"))
 logged_label.pack()
 
@@ -135,11 +199,16 @@ main_frame.pack()
 
 # lista użytkowników
 user_list = tk.Listbox(main_frame, width=20)
+user_list.bind("<<ListboxSelect>>", select_chat)
+user_list.insert(tk.END, "GLOBAL")
 user_list.pack(side=tk.LEFT, fill=tk.Y)
 
 # czat
 chat_frame = tk.Frame(main_frame)
 chat_frame.pack(side=tk.RIGHT)
+
+chat_label = tk.Label(chat_frame, text=f"Chat: {current_chat}")
+chat_label.pack()
 
 chat = tk.Text(chat_frame, height=15, width=50)
 chat.pack()
