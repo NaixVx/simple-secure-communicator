@@ -2,13 +2,13 @@ import socket
 import ssl
 import threading
 import tkinter as tk
+import customtkinter as ctk
 from tkinter import simpledialog
 
 HOST = "localhost"
 
 sock = None
 nickname = None
-
 current_chat = "GLOBAL"
 
 chat_history = {
@@ -18,18 +18,19 @@ chat_history = {
 def log(msg):
     print("[CLIENT]", msg)
 
+def safe_insert(msg):
+    root.after(0, lambda: (chat.insert("end", msg + "\n"), chat.see("end")))
+
 def connect():
     global sock
 
     if sock:
         try:
-            log("Closing previous connection")
             sock.close()
         except:
             pass
 
     use_tls = tls_var.get()
-
     raw_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     if use_tls:
@@ -41,52 +42,43 @@ def connect():
         port = 5000
 
     try:
-        log(f"Connecting to {HOST}:{port} TLS={use_tls}")
         sock.connect((HOST, port))
-
-        # wysłanie nicka
         sock.send(f"NICK:{nickname}".encode())
 
-        chat.insert(tk.END, f"Connected as {nickname} TLS={use_tls}\n")
+        safe_insert(f"Connected as {nickname} TLS={use_tls}")
 
         threading.Thread(target=receive, daemon=True).start()
 
     except Exception as e:
-        log(f"Connection error: {e}")
-        chat.insert(tk.END, f"Connection error: {e}\n")
+        safe_insert(f"Connection error: {e}")
 
     refresh_chat()
 
-
 def receive():
     global sock
-
-    log("Receive thread started")
 
     while True:
         try:
             data = sock.recv(1024)
 
             if not data:
-                log("Server closed connection")
-                chat.insert(tk.END, "Disconnected from server\n")
+                safe_insert("Disconnected from server")
                 break
 
             msg = data.decode()
-            log(f"Received: {msg}")
 
-            # USERS LIST
             if msg.startswith("USERS:"):
                 users = msg.split(":")[1].split(",")
 
-                user_list.delete(0, tk.END)
-                user_list.insert(tk.END, "GLOBAL")
+                def update_users():
+                    user_list.delete(0, tk.END)
+                    user_list.insert(tk.END, "GLOBAL")
+                    for u in users:
+                        if u != nickname:
+                            user_list.insert(tk.END, u)
 
-                for u in users:
-                    if u != nickname:
-                        user_list.insert(tk.END, u)
+                root.after(0, update_users)
 
-            # PRIVATE MESSAGE
             elif msg.startswith("[PM from"):
                 sender = msg.split("]")[0].split()[-1]
 
@@ -96,29 +88,16 @@ def receive():
                 chat_history[sender].append(msg)
 
                 if current_chat == sender:
-                    chat.insert(tk.END, msg + "\n")
+                    safe_insert(msg)
 
-            # PUBLIC MESSAGE
             else:
-                if "GLOBAL" not in chat_history:
-                    chat_history["GLOBAL"] = []
-
-                chat_history["GLOBAL"].append(msg)
+                chat_history.setdefault("GLOBAL", []).append(msg)
 
                 if current_chat == "GLOBAL":
-                    chat.insert(tk.END, msg + "\n")
+                    safe_insert(msg)
 
-        except Exception as e:
-            log(f"Receive error: {e}")
+        except:
             break
-
-
-def get_selected_user():
-    selection = user_list.curselection()
-    if selection:
-        return user_list.get(selection[0])
-    return None
-
 
 def select_chat(event):
     global current_chat
@@ -127,108 +106,83 @@ def select_chat(event):
     if not selection:
         return
 
-    target = user_list.get(selection[0])
-
-    current_chat = target
-
-    chat_label.config(text=f"Chat: {current_chat}")
-
+    current_chat = user_list.get(selection[0])
+    chat_label.configure(text=f"Chat: {current_chat}")
     refresh_chat()
 
-
 def refresh_chat():
+    chat.delete("1.0", "end")
 
-    chat.delete("1.0", tk.END)
-
-    if current_chat not in chat_history:
-        chat_history[current_chat] = []
+    chat_history.setdefault(current_chat, [])
 
     for msg in chat_history[current_chat]:
-        chat.insert(tk.END, msg + "\n")
+        chat.insert("end", msg + "\n")
 
+    chat.see("end")
 
-def send():
+def send(event=None):
     msg = entry.get()
-
     if not msg:
         return
 
     try:
         if current_chat == "GLOBAL":
-
             sock.send(f"MSG:{msg}".encode())
-
             chat_history["GLOBAL"].append(f"Me: {msg}")
-
         else:
-
             sock.send(f"PM:{current_chat}:{msg}".encode())
-
-            if current_chat not in chat_history:
-                chat_history[current_chat] = []
-
-            chat_history[current_chat].append(f"[PM to {current_chat}] {msg}")
+            chat_history.setdefault(current_chat, []).append(f"[PM to {current_chat}] {msg}")
 
         refresh_chat()
 
     except Exception as e:
-        chat.insert(tk.END, f"Send error: {e}\n")
+        safe_insert(f"Send error: {e}")
 
-    entry.delete(0, tk.END)
-
+    entry.delete(0, "end")
 
 def toggle_tls():
-    log("TLS toggled")
     connect()
 
-
 # GUI
-root = tk.Tk()
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
+
+root = ctk.CTk()
 root.title("Chat")
 
-# pytanie o nick
-nickname = simpledialog.askstring("Nickname", "Enter nickname:", parent=root)
-if not nickname:
-    nickname = "Anonymous"
-    
-logged_label = tk.Label(root, text=f"Logged as: {nickname}", font=("Arial", 10, "bold"))
+nickname = simpledialog.askstring("Nickname", "Enter nickname:", parent=root) or "Anonymous"
+
+logged_label = ctk.CTkLabel(root, text=f"Logged as: {nickname}")
 logged_label.pack()
 
-main_frame = tk.Frame(root)
+main_frame = ctk.CTkFrame(root)
 main_frame.pack()
 
-# lista użytkowników
 user_list = tk.Listbox(main_frame, width=20)
 user_list.bind("<<ListboxSelect>>", select_chat)
 user_list.insert(tk.END, "GLOBAL")
-user_list.pack(side=tk.LEFT, fill=tk.Y)
+user_list.pack(side="left", fill="y")
 
-# czat
-chat_frame = tk.Frame(main_frame)
-chat_frame.pack(side=tk.RIGHT)
+chat_frame = ctk.CTkFrame(main_frame)
+chat_frame.pack(side="right")
 
-chat_label = tk.Label(chat_frame, text=f"Chat: {current_chat}")
+chat_label = ctk.CTkLabel(chat_frame, text=f"Chat: {current_chat}")
 chat_label.pack()
 
-chat = tk.Text(chat_frame, height=15, width=50)
+chat = ctk.CTkTextbox(chat_frame, width=500, height=300)
 chat.pack()
 
-entry = tk.Entry(chat_frame)
+entry = ctk.CTkEntry(chat_frame)
 entry.pack()
+entry.bind("<Return>", send)
 
-send_btn = tk.Button(chat_frame, text="Send", command=send)
+send_btn = ctk.CTkButton(chat_frame, text="Send", command=send)
 send_btn.pack()
 
 tls_var = tk.BooleanVar()
 
-tls_check = tk.Checkbutton(
-    root,
-    text="Use TLS",
-    variable=tls_var,
-    command=toggle_tls
-)
+tls_check = ctk.CTkCheckBox(root, text="Use TLS", variable=tls_var, command=toggle_tls)
 tls_check.pack()
 
 connect()
-
 root.mainloop()
