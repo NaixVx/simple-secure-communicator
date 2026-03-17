@@ -64,30 +64,26 @@ def handle_client(conn, addr):
 
             # wiadomość prywatna
             if msg.startswith("PM:"):
-
                 try:
                     _, target, text = msg.split(":", 2)
 
                     if target in clients:
-                        clients[target].send(f"[PM from {nick}] {text}".encode())
+                        # wysyłamy strukturalnie
+                        clients[target].send(f"PM:{nick}:{target}:{text}".encode())
                         print(f"[PM] {nick} -> {target}: {text}")
-
                     else:
-                        conn.send(f"[SERVER] user {target} not found".encode())
+                        conn.send(f"SERVER:user {target} not found".encode())
 
                 except Exception as e:
                     print(f"[PM ERROR] {e}")
 
             # wiadomość publiczna
             elif msg.startswith("MSG:"):
-
                 text = msg.split(":", 1)[1]
-
-                print(f"[PUBLIC] {nick}: {text}")
 
                 for user, client in clients.items():
                     if client != conn:
-                        client.send(f"{nick}: {text}".encode())
+                        client.send(f"MSG:{nick}:{text}".encode())
 
             else:
                 print("[UNKNOWN FORMAT]", msg)

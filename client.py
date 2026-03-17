@@ -15,11 +15,14 @@ chat_history = {
     "GLOBAL": []
 }
 
+
 def log(msg):
     print("[CLIENT]", msg)
 
+
 def safe_insert(msg):
     root.after(0, lambda: (chat.insert("end", msg + "\n"), chat.see("end")))
+
 
 def connect():
     global sock
@@ -54,6 +57,7 @@ def connect():
 
     refresh_chat()
 
+
 def receive():
     global sock
 
@@ -79,25 +83,36 @@ def receive():
 
                 root.after(0, update_users)
 
-            elif msg.startswith("[PM from"):
-                sender = msg.split("]")[0].split()[-1]
+            elif msg.startswith("PM:"):
+                try:
+                    _, sender, receiver, text = msg.split(":", 3)
 
-                if sender not in chat_history:
-                    chat_history[sender] = []
+                    chat_history.setdefault(sender, []).append(f"[PM from {sender}] {text}")
 
-                chat_history[sender].append(msg)
+                    if current_chat == sender:
+                        safe_insert(f"[PM from {sender}] {text}")
 
-                if current_chat == sender:
-                    safe_insert(msg)
+                except Exception as e:
+                    log(f"PM parse error: {e}")
+
+            elif msg.startswith("MSG:"):
+                try:
+                    _, sender, text = msg.split(":", 2)
+
+                    chat_history.setdefault("GLOBAL", []).append(f"{sender}: {text}")
+
+                    if current_chat == "GLOBAL":
+                        safe_insert(f"{sender}: {text}")
+
+                except Exception as e:
+                    log(f"MSG parse error: {e}")
 
             else:
-                chat_history.setdefault("GLOBAL", []).append(msg)
-
-                if current_chat == "GLOBAL":
-                    safe_insert(msg)
+                log(f"Unknown message: {msg}")
 
         except:
             break
+
 
 def select_chat(event):
     global current_chat
@@ -110,6 +125,7 @@ def select_chat(event):
     chat_label.configure(text=f"Chat: {current_chat}")
     refresh_chat()
 
+
 def refresh_chat():
     chat.delete("1.0", "end")
 
@@ -119,6 +135,7 @@ def refresh_chat():
         chat.insert("end", msg + "\n")
 
     chat.see("end")
+
 
 def send(event=None):
     msg = entry.get()
@@ -140,8 +157,10 @@ def send(event=None):
 
     entry.delete(0, "end")
 
+
 def toggle_tls():
     connect()
+
 
 # GUI
 ctk.set_appearance_mode("dark")
@@ -149,40 +168,58 @@ ctk.set_default_color_theme("blue")
 
 root = ctk.CTk()
 root.title("Chat")
+root.geometry("700x450")
 
 nickname = simpledialog.askstring("Nickname", "Enter nickname:", parent=root) or "Anonymous"
 
-logged_label = ctk.CTkLabel(root, text=f"Logged as: {nickname}")
-logged_label.pack()
+# ===== TOP BAR =====
+top_bar = ctk.CTkFrame(root)
+top_bar.pack(fill="x")
 
-main_frame = ctk.CTkFrame(root)
-main_frame.pack()
-
-user_list = tk.Listbox(main_frame, width=20)
-user_list.bind("<<ListboxSelect>>", select_chat)
-user_list.insert(tk.END, "GLOBAL")
-user_list.pack(side="left", fill="y")
-
-chat_frame = ctk.CTkFrame(main_frame)
-chat_frame.pack(side="right")
-
-chat_label = ctk.CTkLabel(chat_frame, text=f"Chat: {current_chat}")
-chat_label.pack()
-
-chat = ctk.CTkTextbox(chat_frame, width=500, height=300)
-chat.pack()
-
-entry = ctk.CTkEntry(chat_frame)
-entry.pack()
-entry.bind("<Return>", send)
-
-send_btn = ctk.CTkButton(chat_frame, text="Send", command=send)
-send_btn.pack()
+logged_label = ctk.CTkLabel(top_bar, text=f"Logged as: {nickname}")
+logged_label.pack(side="left", padx=10, pady=5)
 
 tls_var = tk.BooleanVar()
 
-tls_check = ctk.CTkCheckBox(root, text="Use TLS", variable=tls_var, command=toggle_tls)
-tls_check.pack()
+tls_check = ctk.CTkCheckBox(
+    top_bar,
+    text="TLS",
+    variable=tls_var,
+    command=toggle_tls,
+    width=60
+)
+tls_check.pack(side="right", padx=10)
+
+# ===== MAIN =====
+main_frame = ctk.CTkFrame(root)
+main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+# ===== SIDEBAR =====
+user_list = tk.Listbox(main_frame, width=20)
+user_list.bind("<<ListboxSelect>>", select_chat)
+user_list.insert(tk.END, "GLOBAL")
+user_list.pack(side="left", fill="y", padx=(0, 10))
+
+# ===== CHAT AREA =====
+chat_frame = ctk.CTkFrame(main_frame)
+chat_frame.pack(side="right", fill="both", expand=True)
+
+chat_label = ctk.CTkLabel(chat_frame, text=f"Chat: {current_chat}")
+chat_label.pack(anchor="w", padx=10, pady=(5, 0))
+
+chat = ctk.CTkTextbox(chat_frame, corner_radius=10)
+chat.pack(fill="both", expand=True, padx=10, pady=5)
+
+# ===== INPUT BAR =====
+bottom_bar = ctk.CTkFrame(chat_frame)
+bottom_bar.pack(fill="x", padx=10, pady=5)
+
+entry = ctk.CTkEntry(bottom_bar)
+entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
+entry.bind("<Return>", send)
+
+send_btn = ctk.CTkButton(bottom_bar, text="Send", width=80, command=send)
+send_btn.pack(side="right")
 
 connect()
 root.mainloop()
