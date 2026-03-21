@@ -48,7 +48,8 @@ def connect():
         sock.connect((HOST, port))
         sock.send(f"NICK:{nickname}".encode())
 
-        safe_insert(f"Connected as {nickname} TLS={use_tls}")
+        # safe_insert(f"Connected as {nickname}")
+        # safe_insert(f"Connected as {nickname} TLS={use_tls}")
 
         threading.Thread(target=receive, daemon=True).start()
 
@@ -99,10 +100,10 @@ def receive():
                 try:
                     _, sender, text = msg.split(":", 2)
 
-                    chat_history.setdefault("GLOBAL", []).append(f"{sender}: {text}")
+                    chat_history.setdefault("GLOBAL", []).append(f"[{sender}]: {text}")
 
                     if current_chat == "GLOBAL":
-                        safe_insert(f"{sender}: {text}")
+                        safe_insert(f"[{sender}]: {text}")
 
                 except Exception as e:
                     log(f"MSG parse error: {e}")
