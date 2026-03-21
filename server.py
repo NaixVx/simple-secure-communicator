@@ -62,13 +62,11 @@ def handle_client(conn, addr):
 
             print(f"[RAW MESSAGE] {nick}: {msg}")
 
-            # wiadomość prywatna
             if msg.startswith("PM:"):
                 try:
                     _, target, text = msg.split(":", 2)
 
                     if target in clients:
-                        # wysyłamy strukturalnie
                         clients[target].send(f"PM:{nick}:{target}:{text}".encode())
                         print(f"[PM] {nick} -> {target}: {text}")
                     else:
@@ -77,7 +75,6 @@ def handle_client(conn, addr):
                 except Exception as e:
                     print(f"[PM ERROR] {e}")
 
-            # wiadomość publiczna
             elif msg.startswith("MSG:"):
                 text = msg.split(":", 1)[1]
 
@@ -142,7 +139,7 @@ tls_sock.bind((HOST, PORT_TLS))
 tls_sock.listen()
 
 context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-context.load_cert_chain(certfile="certs/cert.pem", keyfile="certs/key.pem")
+context.load_cert_chain(certfile="certs/server.pem", keyfile="certs/server.key")
 
 print("Server running")
 print("Plain port:", PORT_PLAIN)

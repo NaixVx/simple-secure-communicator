@@ -5,7 +5,11 @@ import tkinter as tk
 import customtkinter as ctk
 from tkinter import simpledialog
 
-HOST = "localhost"
+HOST =  None # IP of server machine or "localhost"
+
+if not HOST:
+    safe_insert("ERROR: Configure server IP (e.g. HOST = '192.168.1.4')")
+    return
 
 sock = None
 nickname = None
@@ -37,7 +41,7 @@ def connect():
     raw_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     if use_tls:
-        context = ssl.create_default_context(cafile="certs/cert.pem")
+        context = ssl.create_default_context(cafile="certs/ca.pem")
         sock = context.wrap_socket(raw_sock, server_hostname=HOST)
         port = 5001
     else:

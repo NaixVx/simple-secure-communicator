@@ -24,16 +24,71 @@ A simple chat application (public + private messages) written in Python.
 
 In the project directory:
 
+### - Default version:
+
 ```bash
 mkdir -p certs
+cd certs
 
-openssl req -x509 -newkey rsa:4096 \
--keyout certs/key.pem \
--out certs/cert.pem \
+# 1. Create local CA (trusted by clients)
+openssl genrsa -out ca.key 2048
+
+openssl req -x509 -new -nodes \
+-key ca.key \
+-sha256 -days 3650 \
+-out ca.pem \
+-subj "/CN=LocalCA"
+
+# 2. Create server key + CSR (use server IP)
+openssl req -newkey rsa:2048 -nodes \
+-keyout server.key \
+-out server.csr \
+-subj "/CN=192.168.1.4"
+
+# 3. Sign server certificate with CA
+openssl x509 -req \
+-in server.csr \
+-CA ca.pem \
+-CAkey ca.key \
+-CAcreateserial \
+-out server.pem \
 -days 365 \
--nodes \
--subj "/CN=localhost" \
--addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+-sha256 \
+-extfile <(printf "subjectAltName=IP:192.168.1.4")
+```
+## 📦 Distribution
+
+###  Copy `ca.pem` to all client machines
+
+### - Localhost version:
+```bash
+mkdir -p certs
+cd certs
+
+# CA
+openssl genrsa -out ca.key 2048
+
+openssl req -x509 -new -nodes \
+-key ca.key \
+-sha256 -days 3650 \
+-out ca.pem \
+-subj "/CN=LocalCA"
+
+# Server cert for localhost
+openssl req -newkey rsa:2048 -nodes \
+-keyout server.key \
+-out server.csr \
+-subj "/CN=localhost"
+
+openssl x509 -req \
+-in server.csr \
+-CA ca.pem \
+-CAkey ca.key \
+-CAcreateserial \
+-out server.pem \
+-days 365 \
+-sha256 \
+-extfile <(printf "subjectAltName=DNS:localhost,IP:127.0.0.1")
 ```
 
 ## ▶️ Running the server
