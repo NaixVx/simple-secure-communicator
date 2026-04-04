@@ -167,6 +167,8 @@ class ServerGUI:
 
         context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
         context.load_cert_chain("certs/server.pem", "certs/server.key")
+        context.minimum_version = ssl.TLSVersion.TLSv1_3
+        context.maximum_version = ssl.TLSVersion.TLSv1_3
 
         logger.info("SERVER_RUNNING host=%s plain=%d tls=%d", host, plain_port, tls_port)
 

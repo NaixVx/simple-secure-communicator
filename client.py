@@ -58,6 +58,9 @@ def create_socket(use_tls, host, port_plain, port_tls):
 
     if use_tls:
         context = ssl.create_default_context(cafile="certs/ca.pem")
+        context.minimum_version = ssl.TLSVersion.TLSv1_3
+        context.maximum_version = ssl.TLSVersion.TLSv1_3
+
         wrapped = context.wrap_socket(raw_sock, server_hostname=host)
         return wrapped, port_tls
     else:
@@ -87,6 +90,17 @@ def connect_to_server():
     try:
         new_sock, port = create_socket(use_tls, HOST, PORT_PLAIN, PORT_TLS)
         new_sock.connect((HOST, port))
+
+        # ---- TLS DEBUG INFO ----
+        if use_tls:
+            try:
+                log(f"TLS version: {new_sock.version()}")
+                log(f"Cipher: {new_sock.cipher()}")
+                log(f"Peer cert subject: {new_sock.getpeercert().get('subject', '')}")
+            except Exception as e:
+                log(f"TLS inspect error: {e}")
+        # ------------------------
+
         new_sock.send(f"NICK:{nickname}".encode())
 
         sock = new_sock  # assign only after success
@@ -102,7 +116,6 @@ def connect_to_server():
         ).start()
 
         log("Connected")
-
 
     except Exception as e:
         log(f"Connection error: {e}")
