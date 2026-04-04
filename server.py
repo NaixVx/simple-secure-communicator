@@ -85,12 +85,12 @@ class ServerGUI:
         # --- PORTS ---
         tk.Label(frame, text="Plain Port:").grid(row=1, column=0)
         self.plain_entry = tk.Entry(frame)
-        self.plain_entry.insert(0, "5000")
+        self.plain_entry.insert(0, "49152")
         self.plain_entry.grid(row=1, column=1)
 
         tk.Label(frame, text="TLS Port:").grid(row=2, column=0)
         self.tls_entry = tk.Entry(frame)
-        self.tls_entry.insert(0, "5001")
+        self.tls_entry.insert(0, "49153")
         self.tls_entry.grid(row=2, column=1)
 
         self.start_btn = tk.Button(frame, text="Start Server", command=self.start_server)

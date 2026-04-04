@@ -55,7 +55,6 @@ def update_user_list(users):
 
 def create_socket(use_tls, host, port_plain, port_tls):
     raw_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    raw_sock.settimeout(5)
 
     if use_tls:
         context = ssl.create_default_context(cafile="certs/ca.pem")
@@ -69,57 +68,64 @@ def connect_to_server():
     global sock
 
     if not HOST:
-        safe_insert("ERROR: Configure server IP")
+        log("ERROR: Configure server IP")
         return
 
+    # close old socket safely
     if sock:
+        try:
+            sock.shutdown(socket.SHUT_RDWR)
+        except Exception:
+            pass
         try:
             sock.close()
         except Exception:
             pass
-        sock = None
 
     use_tls = tls_var.get()
 
     try:
-        sock, port = create_socket(use_tls, HOST, PORT_PLAIN, PORT_TLS)
-        sock.connect((HOST, port))
-        sock.send(f"NICK:{nickname}".encode())
+        new_sock, port = create_socket(use_tls, HOST, PORT_PLAIN, PORT_TLS)
+        new_sock.connect((HOST, port))
+        new_sock.send(f"NICK:{nickname}".encode())
+
+        sock = new_sock  # assign only after success
 
         connection_label.configure(
             text=f"{HOST}:{port} | TLS={'ON' if use_tls else 'OFF'}"
         )
 
-        threading.Thread(target=run_receive_loop, daemon=True).start()
-        safe_insert("Connected")
+        threading.Thread(
+            target=run_receive_loop,
+            args=(new_sock,),
+            daemon=True
+        ).start()
+
+        log("Connected")
+
 
     except Exception as e:
-        sock = None
-        safe_insert(f"Connection error: {e}")
+        log(f"Connection error: {e}")
         return
 
     refresh_chat_view()
 
 
-def run_receive_loop():
-    global sock
-
+def run_receive_loop(local_sock):
     while True:
         try:
-            data = sock.recv(1024)
+            data = local_sock.recv(1024)
 
             if not data:
-                safe_insert("Disconnected from server")
-                sock = None
+                log("Disconnected from server")
                 break
 
             process_server_message(data.decode())
 
         except Exception as e:
-            log(f"Receive error: {e}")
-            safe_insert("Connection lost")
-            sock = None
-            break
+            if local_sock is sock:
+                log(f"Receive error: {e}")
+                log("Connection lost")
 
 
 # ------------------ MESSAGE PROCESSING ------------------
@@ -179,7 +185,7 @@ def send_message(event=None):
         return
 
     if not sock:
-        safe_insert("Not connected")
+        log("Not connected")
         return
 
     try:
@@ -195,7 +201,7 @@ def send_message(event=None):
         refresh_chat_view()
 
     except Exception as e:
-        safe_insert(f"Send error: {e}")
+        log(f"Send error: {e}")
         sock = None
 
     entry.delete(0, "end")
@@ -233,12 +239,12 @@ def prompt_connection_config(root):
 
     tk.Label(dialog, text="Plain Port:").pack()
     plain_entry = tk.Entry(dialog)
-    plain_entry.insert(0, "5000")
+    plain_entry.insert(0, "49152")
     plain_entry.pack()
 
     tk.Label(dialog, text="TLS Port:").pack()
     tls_entry = tk.Entry(dialog)
-    tls_entry.insert(0, "5001")
+    tls_entry.insert(0, "49153")
     tls_entry.pack()
 
     result = None
@@ -345,11 +351,17 @@ def setup_gui():
 
     def on_close():
         global sock
+
         if sock:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except:
+                pass
             try:
                 sock.close()
             except:
                 pass
+
         root.destroy()
 
     root.protocol("WM_DELETE_WINDOW", on_close)
