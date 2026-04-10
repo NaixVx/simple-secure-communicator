@@ -122,6 +122,13 @@ openssl x509 -req \
 -extfile server.ext
 ```
 
+### Generate the fingerprint
+
+```bash
+openssl x509 -in certs/server.pem -noout -fingerprint -sha256 \
+| cut -d'=' -f2 | tr -d '\n' > certs/fingerprint.txt
+```
+
 ## ▶️ Running the server
 
 ```bash

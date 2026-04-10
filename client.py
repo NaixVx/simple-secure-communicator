@@ -4,11 +4,14 @@ import threading
 import tkinter as tk
 import customtkinter as ctk
 from tkinter import simpledialog, messagebox
+import hashlib
+
 
 HOST = None  # set before running or via prompt
 
 PORT_PLAIN = None
 PORT_TLS = None
+EXPECTED_CERT_FP = None
 
 sock = None
 nickname = None
@@ -24,6 +27,21 @@ chat_history = {
 def log(msg):
     print("[CLIENT]", msg)
 
+# ------------------ FINGERPRINT ------------------
+
+def load_fingerprint():
+    try:
+        with open("certs/fingerprint.txt", "r") as f:
+            fp = f.read().strip().replace(":", "")
+
+        if len(fp) != 64:
+            raise ValueError("Invalid fingerprint length")
+
+        return bytes.fromhex(fp)
+
+    except Exception as e:
+        log(f"Fingerprint load error: {e}")
+        return None
 
 # ------------------ UI HELPERS ------------------
 
@@ -91,19 +109,39 @@ def connect_to_server():
         new_sock, port = create_socket(use_tls, HOST, PORT_PLAIN, PORT_TLS)
         new_sock.connect((HOST, port))
 
-        # ---- TLS DEBUG INFO ----
+        # ---- CERTIFICATE PINNING ----
         if use_tls:
+            if EXPECTED_CERT_FP is None:
+                log("No fingerprint loaded")
+                return
             try:
+                cert_bin = new_sock.getpeercert(binary_form=True)
+                actual_fp = hashlib.sha256(cert_bin).digest()
+                log(f"Server fingerprint: {actual_fp.hex().upper()}")
+
+                if actual_fp != EXPECTED_CERT_FP:
+                    log("Certificate pinning FAILED")
+                    log(f"Expected: {EXPECTED_CERT_FP.hex().upper()}")
+                    log(f"Actual:   {actual_fp.hex().upper()}")
+
+                    new_sock.close()
+                    return
+
+                log("Certificate pinning OK (fingerprint match)")
+
+                # optional debug
                 log(f"TLS version: {new_sock.version()}")
-                log(f"Cipher: {new_sock.cipher()}")
-                log(f"Peer cert subject: {new_sock.getpeercert().get('subject', '')}")
+                log(f"Cipher: {new_sock.cipher()[0]}")
+
             except Exception as e:
-                log(f"TLS inspect error: {e}")
-        # ------------------------
+                new_sock.close()
+                log(f"Pinning error: {e}")
+                return
+        # --------------------------------
 
         new_sock.send(f"NICK:{nickname}".encode())
 
-        sock = new_sock  # assign only after success
+        sock = new_sock
 
         connection_label.configure(
             text=f"{HOST}:{port} | TLS={'ON' if use_tls else 'OFF'}"
@@ -385,8 +423,8 @@ def setup_gui():
 # ------------------ MAIN ------------------
 
 def main():
-    global HOST, PORT_PLAIN, PORT_TLS
-
+    global HOST, PORT_PLAIN, PORT_TLS, EXPECTED_CERT_FP
+    
     root = setup_gui()
 
     config = prompt_connection_config(root)
@@ -396,6 +434,14 @@ def main():
     HOST = config["host"]
     PORT_PLAIN = config["plain"]
     PORT_TLS = config["tls"]
+
+    EXPECTED_CERT_FP = load_fingerprint()
+
+    if EXPECTED_CERT_FP is None:
+        log("Cannot start without valid fingerprint")
+        return
+
+    log(f"Pinned fingerprint: {EXPECTED_CERT_FP.hex().upper()}")
 
     connect_to_server()
     root.mainloop()
