@@ -139,7 +139,12 @@ def connect_to_server():
                 return
         # --------------------------------
 
-        new_sock.send(f"NICK:{nickname}".encode())
+        password = simpledialog.askstring("Password", "Enter password:", show="*", parent=root)
+        if password is None:
+            new_sock.close()
+            return
+            
+        new_sock.send(f"AUTH:{nickname}:{password}".encode())
 
         sock = new_sock
 
@@ -190,6 +195,23 @@ def process_server_message(msg):
 
     elif msg.startswith("MSG:"):
         handle_global_message(msg)
+
+    elif msg.startswith("SERVER:AUTH_FAILED"):
+        log("Authentication failed")
+
+        global sock
+        if sock:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except:
+                pass
+            try:
+                sock.close()
+            except:
+                pass
+            sock = None
+
+        root.after(0, lambda: connection_label.configure(text="Auth failed"))
 
     else:
         log(f"Unknown message: {msg}")

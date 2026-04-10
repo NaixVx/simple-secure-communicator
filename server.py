@@ -4,6 +4,7 @@ import threading
 import logging
 import tkinter as tk
 from tkinter import messagebox
+import hashlib
 
 
 clients = {}
@@ -21,6 +22,27 @@ if not logger.handlers:
     ))
     logger.addHandler(handler)
 
+# ------------------ USER DATABASE ------------------
+
+def load_users(filepath="users.txt"):
+    users = {}
+    try:
+        with open(filepath, "r") as f:
+            for line in f:
+                if ":" in line:
+                    user, pwd_hash = line.strip().split(":", 1)
+                    users[user] = pwd_hash
+    except Exception as e:
+        logger.warning("USER_LOAD_ERROR %s", e)
+    return users
+
+
+def verify_user(username, password):
+    if username not in USERS:
+        return False
+
+    hashed = hashlib.sha256(password.encode()).hexdigest()
+    return USERS[username] == hashed
 
 # ------------------ PORT AND IP CHECK ------------------
 
@@ -195,10 +217,16 @@ def broadcast_users():
 
 def register_client(nick, conn, addr):
     with clients_lock:
+        if nick in clients:
+            conn.close()
+            logger.warning("DUPLICATE_LOGIN nick=%s", nick)
+            return False
+
         clients[nick] = conn
 
     logger.info("JOIN nick=%s addr=%s", nick, addr)
     broadcast_users()
+    return True
 
 
 def unregister_client(nick):
@@ -252,30 +280,40 @@ def process_broadcast_message(conn, nick, msg):
 
 # ------------------ CLIENT SESSION ------------------
 
-def receive_client_nick(conn):
+def receive_auth(conn):
     try:
         data = conn.recv(1024)
         if not data:
             return None
 
         msg = data.decode()
-        if not msg.startswith("NICK:"):
+
+        if not msg.startswith("AUTH:"):
             return None
 
-        return msg.split(":", 1)[1]
+        _, username, password = msg.split(":", 2)
+
+        if verify_user(username, password):
+            return username
+        else:
+            conn.send("SERVER:AUTH_FAILED".encode())
+            conn.shutdown(socket.SHUT_RDWR)
+            conn.close()
+            return None
 
     except Exception:
         return None
 
 
 def run_client_session(conn, addr):
-    nick = receive_client_nick(conn)
+    nick = receive_auth(conn)
 
     if not nick:
         conn.close()
         return
 
-    register_client(nick, conn, addr)
+    if not register_client(nick, conn, addr):
+        return
 
     while True:
         try:
@@ -334,6 +372,8 @@ def start_acceptors(plain, tls, context):
 # ------------------ MAIN ------------------
 
 if __name__ == "__main__":
+    USERS = load_users()
+
     root = tk.Tk()
     app = ServerGUI(root)
     root.mainloop()
