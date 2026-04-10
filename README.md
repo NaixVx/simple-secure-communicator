@@ -2,9 +2,10 @@
 
 A simple chat application (public + private messages) written in Python.
 
-###  Created to showcase how TLS works.
+### Created to showcase how TLS works
 
 ## Features
+
 - global chat
 - private messages (PM)
 - user list
@@ -14,6 +15,7 @@ A simple chat application (public + private messages) written in Python.
 ---
 
 ## Requirements
+
 - Python 3.10+
 - openssl
 - Linux / WSL (tested)
@@ -24,28 +26,42 @@ A simple chat application (public + private messages) written in Python.
 
 In the project directory:
 
-### - Default version:
+### - Default version
 
 ```bash
+#!/usr/bin/env bash
+
 mkdir -p certs
 cd certs
 
-# 1. Create local CA (trusted by clients)
+IP="192.168.1.4" # use appropriate ip address
+
+# CA
 openssl genrsa -out ca.key 2048
 
 openssl req -x509 -new -nodes \
 -key ca.key \
 -sha256 -days 3650 \
 -out ca.pem \
--subj "/CN=LocalCA"
+-subj "/CN=LocalCA" \
+-addext "basicConstraints=critical,CA:TRUE" \
+-addext "keyUsage=critical,keyCertSign,cRLSign"
 
-# 2. Create server key + CSR (use server IP)
+# Server CSR
 openssl req -newkey rsa:2048 -nodes \
 -keyout server.key \
 -out server.csr \
--subj "/CN=192.168.1.4"
+-subj "/CN=$IP"
 
-# 3. Sign server certificate with CA
+# Extensions
+cat > server.ext <<EOF
+basicConstraints=CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=IP:$IP
+EOF
+
+# Sign
 openssl x509 -req \
 -in server.csr \
 -CA ca.pem \
@@ -54,14 +70,18 @@ openssl x509 -req \
 -out server.pem \
 -days 365 \
 -sha256 \
--extfile <(printf "subjectAltName=IP:192.168.1.4")
+-extfile server.ext
 ```
+
 ## 📦 Distribution
 
-###  Copy `ca.pem` to all client machines
+### Copy `ca.pem` to all client machines
 
-### - Localhost version:
+### - Localhost version
+
 ```bash
+#!/usr/bin/env bash
+
 mkdir -p certs
 cd certs
 
@@ -72,14 +92,25 @@ openssl req -x509 -new -nodes \
 -key ca.key \
 -sha256 -days 3650 \
 -out ca.pem \
--subj "/CN=LocalCA"
+-subj "/CN=LocalCA" \
+-addext "basicConstraints=critical,CA:TRUE" \
+-addext "keyUsage=critical,keyCertSign,cRLSign"
 
-# Server cert for localhost
+# Server key + CSR
 openssl req -newkey rsa:2048 -nodes \
 -keyout server.key \
 -out server.csr \
 -subj "/CN=localhost"
 
+# Extensions
+cat > server.ext <<EOF
+basicConstraints=CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=DNS:localhost,IP:127.0.0.1
+EOF
+
+# Sign cert
 openssl x509 -req \
 -in server.csr \
 -CA ca.pem \
@@ -88,22 +119,35 @@ openssl x509 -req \
 -out server.pem \
 -days 365 \
 -sha256 \
--extfile <(printf "subjectAltName=DNS:localhost,IP:127.0.0.1")
+-extfile server.ext
+```
+
+### Generate the fingerprint
+
+```bash
+openssl x509 -in certs/server.pem -noout -fingerprint -sha256 \
+| cut -d'=' -f2 | tr -d '\n' > certs/fingerprint.txt
 ```
 
 ## ▶️ Running the server
+
 ```bash
 python3 server.py
 ```
+
 The server starts on:
+
 - 5000 → plain TCP
 - 5001 → TLS
 
 ## ▶️ Running the client (venv)
+
 ```bash
-./run.sh
+./run.sh # works on linux systems only 
 ```
+
 or
+
 ```bash
 python client.py  # inside virtual environment
 ```

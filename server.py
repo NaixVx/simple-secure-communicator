@@ -1,152 +1,379 @@
 import socket
 import ssl
 import threading
+import logging
+import tkinter as tk
+from tkinter import messagebox
+import hashlib
 
-HOST = "0.0.0.0"
-PORT_PLAIN = 5000
-PORT_TLS = 5001
 
-clients = {}   # nick -> socket
+clients = {}
+clients_lock = threading.Lock()
 
+# ------------------ LOGGING ------------------
+
+logger = logging.getLogger("server")
+logger.setLevel(logging.INFO)
+
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s | %(levelname)-7s | %(threadName)s | %(message)s"
+    ))
+    logger.addHandler(handler)
+
+# ------------------ USER DATABASE ------------------
+
+def load_users(filepath="users.txt"):
+    users = {}
+    try:
+        with open(filepath, "r") as f:
+            for line in f:
+                if ":" in line:
+                    user, pwd_hash = line.strip().split(":", 1)
+                    users[user] = pwd_hash
+    except Exception as e:
+        logger.warning("USER_LOAD_ERROR %s", e)
+    return users
+
+
+def verify_user(username, password):
+    if username not in USERS:
+        return False
+
+    hashed = hashlib.sha256(password.encode()).hexdigest()
+    return USERS[username] == hashed
+
+# ------------------ PORT AND IP CHECK ------------------
+
+def is_port_free(port):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(("0.0.0.0", port))
+            return True
+        except OSError:
+            return False
+
+
+def get_local_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+
+# ------------------ LOGGING TO GUI ------------------
+
+class TextHandler(logging.Handler):
+    def __init__(self, widget):
+        super().__init__()
+        self.widget = widget
+
+    def emit(self, record):
+        msg = self.format(record)
+
+        def append():
+            self.widget.insert(tk.END, msg + "\n")
+            self.widget.see(tk.END)
+
+        self.widget.after(0, append)
+
+
+# ------------------ GUI ------------------
+
+class ServerGUI:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Server Control")
+
+        frame = tk.Frame(root)
+        frame.pack(padx=10, pady=10)
+
+        # --- MODE SELECTION ---
+        self.bind_mode = tk.StringVar(value="local")
+
+        tk.Label(frame, text="Mode:").grid(row=0, column=0)
+
+        tk.Radiobutton(frame, text="Local (127.0.0.1)",
+                       variable=self.bind_mode, value="local").grid(row=0, column=1, sticky="w")
+
+        tk.Radiobutton(frame, text="Network (LAN)",
+                       variable=self.bind_mode, value="network").grid(row=0, column=2, sticky="w")
+
+        # --- PORTS ---
+        tk.Label(frame, text="Plain Port:").grid(row=1, column=0)
+        self.plain_entry = tk.Entry(frame)
+        self.plain_entry.insert(0, "49152")
+        self.plain_entry.grid(row=1, column=1)
+
+        tk.Label(frame, text="TLS Port:").grid(row=2, column=0)
+        self.tls_entry = tk.Entry(frame)
+        self.tls_entry.insert(0, "49153")
+        self.tls_entry.grid(row=2, column=1)
+
+        self.start_btn = tk.Button(frame, text="Start Server", command=self.start_server)
+        self.start_btn.grid(row=3, columnspan=3, pady=5)
+
+        # --- CONNECTION INFO ---
+        self.info_label = tk.Label(root, text="Not running")
+        self.info_label.pack()
+
+        # --- LOGS ---
+        self.log_text = tk.Text(root, height=20, width=80)
+        self.log_text.pack(padx=10, pady=10)
+
+        logger.handlers.clear()
+
+        gui_handler = TextHandler(self.log_text)
+        gui_handler.setFormatter(logging.Formatter(
+            "%(asctime)s | %(levelname)s | %(message)s"
+        ))
+
+        logger.addHandler(gui_handler)
+
+    def start_server(self):
+        try:
+            plain_port = int(self.plain_entry.get())
+            tls_port = int(self.tls_entry.get())
+        except ValueError:
+            messagebox.showerror("Error", "Ports must be integers")
+            return
+
+        if not (1 <= plain_port <= 65535 and 1 <= tls_port <= 65535):
+            messagebox.showerror("Error", "Ports must be between 1 and 65535")
+            return
+
+        if plain_port == tls_port:
+            messagebox.showerror("Error", "Ports must be different")
+            return
+
+        if not is_port_free(plain_port) or not is_port_free(tls_port):
+            messagebox.showerror("Error", "One of the ports is already in use")
+            return
+
+        # --- determine bind host ---
+        if self.bind_mode.get() == "local":
+            host = "127.0.0.1"
+            display_ip = "127.0.0.1"
+        else:
+            host = "0.0.0.0"
+            display_ip = get_local_ip()
+
+        logger.info("STARTING mode=%s host=%s", self.bind_mode.get(), host)
+
+        # update UI with connection info
+        self.info_label.config(
+            text=f"Connect: {display_ip}:{plain_port} (plain) | {display_ip}:{tls_port} (TLS)"
+        )
+
+        threading.Thread(
+            target=self.run_server,
+            args=(host, plain_port, tls_port),
+            daemon=True
+        ).start()
+
+        self.start_btn.config(state="disabled")
+
+    def run_server(self, host, plain_port, tls_port):
+        plain = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        plain.bind((host, plain_port))
+        plain.listen()
+
+        tls = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        tls.bind((host, tls_port))
+        tls.listen()
+
+        context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        context.load_cert_chain("certs/server.pem", "certs/server.key")
+        context.minimum_version = ssl.TLSVersion.TLSv1_3
+        context.maximum_version = ssl.TLSVersion.TLSv1_3
+
+        logger.info("SERVER_RUNNING host=%s plain=%d tls=%d", host, plain_port, tls_port)
+
+        start_acceptors(plain, tls, context)
+
+        threading.Event().wait()
+
+
+# ------------------ CLIENT MANAGEMENT ------------------
 
 def broadcast_users():
-    users = ",".join(clients.keys())
-    msg = f"USERS:{users}"
+    with clients_lock:
+        users = ",".join(clients.keys())
+        targets = list(clients.values())
 
-    print(f"[USERS LIST] {users}")
+    logger.info("USERS_LIST users=%s", users)
 
-    for c in clients.values():
+    for c in targets:
         try:
-            c.send(msg.encode())
-        except:
-            pass
+            c.send(f"USERS:{users}".encode())
+        except Exception:
+            logger.warning("SEND_FAILED USERS_LIST")
 
 
-def handle_client(conn, addr):
+def register_client(nick, conn, addr):
+    with clients_lock:
+        if nick in clients:
+            conn.close()
+            logger.warning("DUPLICATE_LOGIN nick=%s", nick)
+            return False
 
+        clients[nick] = conn
+
+    logger.info("JOIN nick=%s addr=%s", nick, addr)
+    broadcast_users()
+    return True
+
+
+def unregister_client(nick):
+    with clients_lock:
+        clients.pop(nick, None)
+
+    logger.info("DISCONNECT nick=%s", nick)
+    broadcast_users()
+
+
+# ------------------ MESSAGE HANDLING ------------------
+
+def process_client_message(conn, nick, msg):
+    if msg.startswith("PM:"):
+        process_private_message(conn, nick, msg)
+    elif msg.startswith("MSG:"):
+        process_broadcast_message(conn, nick, msg)
+    else:
+        logger.warning("UNKNOWN_FORMAT nick=%s msg=%s", nick, msg)
+
+
+def process_private_message(conn, nick, msg):
+    try:
+        _, target, text = msg.split(":", 2)
+
+        with clients_lock:
+            target_conn = clients.get(target)
+
+        if target_conn:
+            target_conn.send(f"PM:{nick}:{target}:{text}".encode())
+            logger.info("PM from=%s to=%s", nick, target)
+        else:
+            conn.send(f"SERVER:user {target} not found".encode())
+
+    except Exception:
+        logger.exception("PM_ERROR nick=%s", nick)
+
+
+def process_broadcast_message(conn, nick, msg):
+    text = msg.split(":", 1)[1]
+
+    with clients_lock:
+        targets = [c for c in clients.values() if c != conn]
+
+    for c in targets:
+        try:
+            c.send(f"MSG:{nick}:{text}".encode())
+        except Exception:
+            logger.warning("BROADCAST_FAILED from=%s", nick)
+
+
+# ------------------ CLIENT SESSION ------------------
+
+def receive_auth(conn):
     try:
         data = conn.recv(1024)
-
         if not data:
-            conn.close()
-            return
+            return None
 
         msg = data.decode()
 
-        if not msg.startswith("NICK:"):
+        if not msg.startswith("AUTH:"):
+            return None
+
+        _, username, password = msg.split(":", 2)
+
+        if verify_user(username, password):
+            return username
+        else:
+            conn.send("SERVER:AUTH_FAILED".encode())
+            conn.shutdown(socket.SHUT_RDWR)
             conn.close()
-            return
+            return None
 
-        nick = msg.split(":", 1)[1]
+    except Exception:
+        return None
 
-    except:
+
+def run_client_session(conn, addr):
+    nick = receive_auth(conn)
+
+    if not nick:
         conn.close()
         return
 
-    clients[nick] = conn
-
-    print(f"[JOIN] {nick} from {addr}")
-    print(f"[CLIENT COUNT] {len(clients)}")
-
-    broadcast_users()
+    if not register_client(nick, conn, addr):
+        return
 
     while True:
         try:
             data = conn.recv(1024)
-
             if not data:
-                print(f"[NO DATA] {nick}")
                 break
 
-            msg = data.decode()
+            process_client_message(conn, nick, data.decode())
 
-            print(f"[RAW MESSAGE] {nick}: {msg}")
-
-            if msg.startswith("PM:"):
-                try:
-                    _, target, text = msg.split(":", 2)
-
-                    if target in clients:
-                        clients[target].send(f"PM:{nick}:{target}:{text}".encode())
-                        print(f"[PM] {nick} -> {target}: {text}")
-                    else:
-                        conn.send(f"SERVER:user {target} not found".encode())
-
-                except Exception as e:
-                    print(f"[PM ERROR] {e}")
-
-            elif msg.startswith("MSG:"):
-                text = msg.split(":", 1)[1]
-
-                for user, client in clients.items():
-                    if client != conn:
-                        client.send(f"MSG:{nick}:{text}".encode())
-
-            else:
-                print("[UNKNOWN FORMAT]", msg)
-
-        except Exception as e:
-            print(f"[ERROR] {nick} -> {e}")
+        except Exception:
+            logger.exception("CLIENT_ERROR nick=%s", nick)
             break
 
-    print(f"[DISCONNECTED] {nick}")
-
-    if nick in clients:
-        del clients[nick]
-
-    broadcast_users()
-
+    unregister_client(nick)
     conn.close()
 
 
-def accept_plain(sock):
+# ------------------ ACCEPT LOOPS ------------------
+
+def run_plain_accept_loop(sock):
     while True:
         conn, addr = sock.accept()
-        print(f"[PLAIN CONNECT] {addr}")
+        logger.info("PLAIN_CONNECT addr=%s", addr)
 
         threading.Thread(
-            target=handle_client,
+            target=run_client_session,
             args=(conn, addr),
             daemon=True
         ).start()
 
 
-def accept_tls(sock, context):
+def run_tls_accept_loop(sock, context):
     while True:
         conn, addr = sock.accept()
 
         try:
-            tls_conn = context.wrap_socket(conn, server_side=True)
-        except Exception as e:
-            print("[TLS ERROR]", e)
+            conn = context.wrap_socket(conn, server_side=True)
+        except Exception:
+            logger.exception("TLS_ERROR addr=%s", addr)
             continue
 
-        print(f"[TLS CONNECT] {addr}")
+        logger.info("TLS_CONNECT addr=%s", addr)
 
         threading.Thread(
-            target=handle_client,
-            args=(tls_conn, addr),
+            target=run_client_session,
+            args=(conn, addr),
             daemon=True
         ).start()
 
 
-plain_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-plain_sock.bind((HOST, PORT_PLAIN))
-plain_sock.listen()
+def start_acceptors(plain, tls, context):
+    threading.Thread(target=run_plain_accept_loop, args=(plain,), daemon=True).start()
+    threading.Thread(target=run_tls_accept_loop, args=(tls, context), daemon=True).start()
 
-tls_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-tls_sock.bind((HOST, PORT_TLS))
-tls_sock.listen()
 
-context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-context.load_cert_chain(certfile="certs/server.pem", keyfile="certs/server.key")
+# ------------------ MAIN ------------------
 
-print("Server running")
-print("Plain port:", PORT_PLAIN)
-print("TLS port:", PORT_TLS)
+if __name__ == "__main__":
+    USERS = load_users()
 
-threading.Thread(target=accept_plain, args=(plain_sock,), daemon=True).start()
-threading.Thread(target=accept_tls, args=(tls_sock, context), daemon=True).start()
-
-while True:
-    pass
+    root = tk.Tk()
+    app = ServerGUI(root)
+    root.mainloop()
