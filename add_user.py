@@ -30,8 +30,8 @@ def main():
         print("User already exists")
         return
 
-    password = getpass.getpass("Password: ")
-    confirm = getpass.getpass("Confirm password: ")
+    password = getpass.getpass("Password: ").strip()
+    confirm = getpass.getpass("Confirm password: ").strip()
 
     if password != confirm:
         print("Passwords do not match")

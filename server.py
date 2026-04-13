@@ -30,10 +30,16 @@ def load_users(filepath="users.txt"):
         with open(filepath, "r") as f:
             for line in f:
                 if ":" in line:
-                    user, pwd_hash = line.strip().split(":", 1)
-                    users[user] = pwd_hash
+                    user, pwd_hash = line.split(":", 1)
+
+                    user = user.strip()
+                    pwd_hash = pwd_hash.strip()
+
+                    if user and pwd_hash:
+                        users[user] = pwd_hash
     except Exception as e:
         logger.warning("USER_LOAD_ERROR %s", e)
+
     return users
 
 
