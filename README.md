@@ -74,7 +74,15 @@ openssl x509 -req \
 
 ## 📦 Distribution
 
-### Copy `ca.pem` to all client machines
+### Copy ca.pem to all client machines
+
+The client must trust the same Certificate Authority as the server.
+This requires copying certs/ca.pem from the server to every client device.
+
+Example using scp:
+```bash
+scp certs/ca.pem user@client_ip:/path/to/project/certs/
+```
 
 ### - Localhost version
 
@@ -120,18 +128,40 @@ openssl x509 -req \
 -extfile server.ext
 ```
 
-### Generate the fingerprint
+### Certificate fingerprint (pinning)
+
+In addition to standard certificate validation, the client uses certificate pinning to verify the identity of the server. This is done by comparing the SHA-256 fingerprint of the server certificate with a locally stored reference value.
+
+After generating the server certificate, create the fingerprint:
 
 ```bash
 openssl x509 -in certs/server.pem -noout -fingerprint -sha256 \
 | cut -d'=' -f2 | tr -d '\n' > certs/fingerprint.txt
 ```
 
-### Add users
+The resulting fingerprint.txt file must be copied to each client machine.
+
+Example:
+```bash
+scp certs/fingerprint.txt user@client_ip:/path/to/project/certs/
+```
+The client will refuse the connection if the received server certificate fingerprint does not match the expected value.
+
+### 👤 User management
+
+Users are stored on the server side in a users.txt file.
 
 ```bash
 ./add_user.py
 ```
+The script will:
+- prompt for username and password
+- hash the password using SHA-256
+- append the user to users.txt
+⚠️ Important:
+- This must be executed on the server machine
+- The client does not store or manage users
+- Authentication is performed by the server during connection
 
 ## ▶️ Running the server
 
