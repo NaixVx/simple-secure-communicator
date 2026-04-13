@@ -29,7 +29,6 @@ In the project directory:
 ### - Default version
 
 ```bash
-#!/usr/bin/env bash
 
 mkdir -p certs
 cd certs
@@ -80,7 +79,6 @@ openssl x509 -req \
 ### - Localhost version
 
 ```bash
-#!/usr/bin/env bash
 
 mkdir -p certs
 cd certs
@@ -127,6 +125,12 @@ openssl x509 -req \
 ```bash
 openssl x509 -in certs/server.pem -noout -fingerprint -sha256 \
 | cut -d'=' -f2 | tr -d '\n' > certs/fingerprint.txt
+```
+
+### Add users
+
+```bash
+./add_user.py
 ```
 
 ## ▶️ Running the server
